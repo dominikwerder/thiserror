@@ -258,3 +258,34 @@ pub mod __private {
     #[doc(hidden)]
     pub use crate::provide::ThiserrorProvide;
 }
+
+pub enum UserErrorClass {
+    Unspecified,
+    Internal,
+    InvalidRequest,
+    BadInput,
+}
+
+pub struct UserErrorContent {
+    string: String,
+}
+
+impl UserErrorContent {
+    pub fn from_string<S>(string: S) -> Self
+    where
+        S: Into<String>,
+    {
+        Self {
+            string: string.into(),
+        }
+    }
+
+    pub fn get_string(&self) -> &str {
+        &self.string
+    }
+}
+
+pub trait UserErrorInfo {
+    fn class(&self) -> UserErrorClass;
+    fn content(&self) -> UserErrorContent;
+}

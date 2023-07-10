@@ -44,7 +44,10 @@ impl Enum<'_> {
         let has_display = self.has_display();
         for variant in &self.variants {
             variant.validate()?;
-            if has_display && variant.attrs.display.is_none() && variant.attrs.transparent.is_none()
+            if false
+                && has_display
+                && variant.attrs.display.is_none()
+                && variant.attrs.transparent.is_none()
             {
                 return Err(Error::new_spanned(
                     variant.original,

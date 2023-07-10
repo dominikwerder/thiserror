@@ -7,8 +7,8 @@ use quote::{format_ident, quote, quote_spanned, ToTokens};
 use std::collections::BTreeSet as Set;
 use syn::{DeriveInput, GenericArgument, Member, PathArguments, Result, Token, Type};
 
-pub fn derive(input: &DeriveInput) -> TokenStream {
-    match try_expand(input) {
+pub fn derive(input: &DeriveInput, helpers: &crate::expand::DummyHelpers) -> TokenStream {
+    match try_expand(input, helpers) {
         Ok(expanded) => expanded,
         // If there are invalid attributes in the input, expand to an Error impl
         // anyway to minimize spurious knock-on errors in other code that uses
@@ -17,12 +17,26 @@ pub fn derive(input: &DeriveInput) -> TokenStream {
     }
 }
 
-fn try_expand(input: &DeriveInput) -> Result<TokenStream> {
-    let input = Input::from_syn(input)?;
+pub struct DummyHelpers {
+    pub attr_empty: syn::Attribute,
+}
+
+impl DummyHelpers {
+    pub fn new() -> Self {
+        let attr_empty: syn::Attribute = syn::parse_quote!(#[dummy_attribute]);
+        Self { attr_empty }
+    }
+}
+
+pub fn try_expand(
+    input: &DeriveInput,
+    helpers: &crate::expand::DummyHelpers,
+) -> Result<TokenStream> {
+    let input = Input::from_syn(input, helpers)?;
     input.validate()?;
     Ok(match input {
         Input::Struct(input) => impl_struct(input),
-        Input::Enum(input) => impl_enum(input),
+        Input::Enum(input) => impl_enum(input, helpers),
     })
 }
 
@@ -220,7 +234,7 @@ fn impl_struct(input: Struct) -> TokenStream {
     }
 }
 
-fn impl_enum(input: Enum) -> TokenStream {
+fn impl_enum(input: Enum, _helpers: &crate::expand::DummyHelpers) -> TokenStream {
     let ty = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let mut error_inferred_bounds = InferredBounds::new();
@@ -396,6 +410,7 @@ fn impl_enum(input: Enum) -> TokenStream {
             None
         };
         let arms = input.variants.iter().map(|variant| {
+            let ident = &variant.ident;
             let mut display_implied_bounds = Set::new();
             let display = match &variant.attrs.display {
                 Some(display) => {
@@ -403,12 +418,58 @@ fn impl_enum(input: Enum) -> TokenStream {
                     display.to_token_stream()
                 }
                 None => {
-                    let only_field = match &variant.fields[0].member {
-                        Member::Named(ident) => ident.clone(),
-                        Member::Unnamed(index) => format_ident!("_{}", index),
-                    };
-                    display_implied_bounds.insert((0, Trait::Display));
-                    quote!(::core::fmt::Display::fmt(#only_field, __formatter))
+                    if false {
+                        let only_field = match &variant.fields[0].member {
+                            Member::Named(ident) => ident.clone(),
+                            Member::Unnamed(index) => format_ident!("_{}", index),
+                        };
+                        display_implied_bounds.insert((0, Trait::Display));
+                        quote!(::core::fmt::Display::fmt(#only_field, __formatter))
+                    } else {
+                        if let Some(ff) = variant.from_field() {
+                            match &ff.member {
+                                Member::Unnamed(ix) => {
+                                    let tyname = ty.to_string().to_token_stream();
+                                    let varname = variant.ident.to_string().to_token_stream();
+                                    let ix = ix.index as usize;
+                                    if ix == 0 {
+                                        quote!({
+                                            let v = if let #ty::#ident(xy) = &self {
+                                                xy
+                                            } else {
+                                                panic!("unexpected variant")
+                                            };
+                                            ::core::write!(__formatter, "{}::{}({})", #tyname, #varname, v)
+                                        })
+                                    } else {
+                                        panic!("TODO support from-field in arbitrary position")
+                                    }
+                                }
+                                Member::Named(_ident) => {
+                                    if true {
+                                        panic!("TODO")
+                                    }
+                                    // quote!(std::fmt::Display::fmt(#s1, __formatter).unwrap();)
+                                    let _s1 = format!(
+                                        "{}({})",
+                                        variant.ident.to_string(),
+                                        "CASE2".to_string()
+                                    );
+                                    let s1 = variant.ident.to_string().to_token_stream();
+                                    quote!(::core::fmt::Display::fmt(#s1, __formatter))
+                                }
+                            }
+                        } else {
+                            let tyname = ty.to_string().to_token_stream();
+                            let varname = variant.ident.to_string().to_token_stream();
+                            quote!({
+                                ::core::fmt::Display::fmt(#tyname, __formatter)?;
+                                ::core::fmt::Display::fmt("::", __formatter)?;
+                                ::core::fmt::Display::fmt(#varname, __formatter)?;
+                                Ok(())
+                            })
+                        }
+                    }
                 }
             };
             for (field, bound) in display_implied_bounds {
@@ -417,7 +478,6 @@ fn impl_enum(input: Enum) -> TokenStream {
                     display_inferred_bounds.insert(field.ty, bound);
                 }
             }
-            let ident = &variant.ident;
             let pat = fields_pat(&variant.fields);
             quote! {
                 #ty::#ident #pat => #display
@@ -438,7 +498,71 @@ fn impl_enum(input: Enum) -> TokenStream {
             }
         })
     } else {
-        None
+        let use_as_display = None::<TokenStream>;
+        let void_deref = None::<TokenStream>;
+        let arms: Vec<_> = input
+            .variants
+            .iter()
+            .map(|variant| {
+                let ident = &variant.ident;
+                let display = if let Some(ff) = variant.from_field() {
+                    match &ff.member {
+                        Member::Unnamed(ix) => {
+                            let tyname = ty.to_string().to_token_stream();
+                            let varname = variant.ident.to_string().to_token_stream();
+                            let ix = ix.index as usize;
+                            if ix == 0 {
+                                quote!({
+                                    let v = if let #ty::#ident(xy) = &self {
+                                        xy
+                                    } else {
+                                        panic!("unexpected variant")
+                                    };
+                                    std::write!(__formatter, "{}::{}({})", #tyname, #varname, v)
+                                })
+                            } else {
+                                panic!("TODO support from-field in arbitrary position")
+                            }
+                        }
+                        Member::Named(_ident) => {
+                            if true {
+                                panic!("TODO")
+                            }
+                            // quote!(std::fmt::Display::fmt(#s1, __formatter).unwrap();)
+                            let _s1 =
+                                format!("{}({})", variant.ident.to_string(), "CASE2".to_string());
+                            let s1 = variant.ident.to_string().to_token_stream();
+                            quote!(std::fmt::Display::fmt(#s1, __formatter))
+                        }
+                    }
+                } else {
+                    let tyname = ty.to_string().to_token_stream();
+                    let varname = variant.ident.to_string().to_token_stream();
+                    quote!({
+                        std::fmt::Display::fmt(#tyname, __formatter)?;
+                        std::fmt::Display::fmt("::", __formatter)?;
+                        std::fmt::Display::fmt(#varname, __formatter)?;
+                        Ok(())
+                    })
+                };
+                let pat = fields_pat(&variant.fields);
+                quote! {
+                    #ty::#ident #pat => #display
+                }
+            })
+            .collect();
+        Some(quote! {
+            #[allow(unused_qualifications)]
+            impl #impl_generics std::fmt::Display for #ty #ty_generics  {
+                fn fmt(&self, __formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    #use_as_display
+                    #[allow(unused_variables, deprecated, clippy::used_underscore_binding)]
+                    match #void_deref self {
+                        #(#arms,)*
+                    }
+                }
+            }
+        })
     };
 
     let from_impls = input.variants.iter().filter_map(|variant| {
@@ -458,6 +582,20 @@ fn impl_enum(input: Enum) -> TokenStream {
         })
     });
 
+    let tyname = ty.to_string().to_token_stream();
+    let user_info_impl = Some(quote! {
+        #[allow(unused_qualifications)]
+        impl #impl_generics thiserror::UserErrorInfo for #ty #ty_generics  {
+            fn class(&self) -> thiserror::UserErrorClass {
+                thiserror::UserErrorClass::Unspecified
+            }
+
+            fn content(&self) -> thiserror::UserErrorContent {
+                thiserror::UserErrorContent::from_string(format!("[content-for-{}]", #tyname))
+            }
+        }
+    });
+
     if input.generics.type_params().next().is_some() {
         let self_token = <Token![Self]>::default();
         error_inferred_bounds.insert(self_token, Trait::Debug);
@@ -473,6 +611,7 @@ fn impl_enum(input: Enum) -> TokenStream {
         }
         #display_impl
         #(#from_impls)*
+        #user_info_impl
     }
 }
 

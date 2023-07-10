@@ -41,10 +41,13 @@ pub struct Field<'a> {
 }
 
 impl<'a> Input<'a> {
-    pub fn from_syn(node: &'a DeriveInput) -> Result<Self> {
+    pub fn from_syn(
+        node: &'a DeriveInput,
+        helpers: &'a crate::expand::DummyHelpers,
+    ) -> Result<Self> {
         match &node.data {
             Data::Struct(data) => Struct::from_syn(node, data).map(Input::Struct),
-            Data::Enum(data) => Enum::from_syn(node, data).map(Input::Enum),
+            Data::Enum(data) => Enum::from_syn(node, data, helpers).map(Input::Enum),
             Data::Union(_) => Err(Error::new_spanned(
                 node,
                 "union as errors are not supported",
@@ -72,7 +75,11 @@ impl<'a> Struct<'a> {
 }
 
 impl<'a> Enum<'a> {
-    fn from_syn(node: &'a DeriveInput, data: &'a DataEnum) -> Result<Self> {
+    fn from_syn(
+        node: &'a DeriveInput,
+        data: &'a DataEnum,
+        helpers: &'a crate::expand::DummyHelpers,
+    ) -> Result<Self> {
         let attrs = attr::get(&node.attrs)?;
         let scope = ParamsInScope::new(&node.generics);
         let span = attrs.span().unwrap_or_else(Span::call_site);
@@ -80,7 +87,7 @@ impl<'a> Enum<'a> {
             .variants
             .iter()
             .map(|node| {
-                let mut variant = Variant::from_syn(node, &scope, span)?;
+                let mut variant = Variant::from_syn(node, &scope, span, helpers)?;
                 if let display @ None = &mut variant.attrs.display {
                     display.clone_from(&attrs.display);
                 }
@@ -101,16 +108,57 @@ impl<'a> Enum<'a> {
     }
 }
 
+// const yoyo: syn::Attribute = syn::parse_quote!(#[dummy_attribute]);
+
+#[allow(unused)]
+fn dummy_parse_buffer<'a>() -> syn::parse::ParseBuffer<'a> {
+    todo!()
+}
+
+#[allow(unused)]
+fn dummy_attr() -> &'static syn::Attribute {
+    // static cell: Arc<RwLock<syn::Attribute>> = Arc::new();
+    let _a: syn::Attribute = syn::parse_quote!(#[dummy_attribute]);
+    // let b: &'static syn::Attribute = &a;
+    // let parsed: syn::parse::ParseStream = syn::parse_str("").unwrap();
+    let _ts = proc_macro2::TokenStream::new();
+    let pb: syn::parse::ParseBuffer = dummy_parse_buffer();
+    let ps = syn::parse::ParseStream::from(&pb);
+    let attr_all = ps.call(syn::Attribute::parse_outer).unwrap();
+    attr_all.get(0).as_ref().unwrap();
+    todo!()
+}
+
 impl<'a> Variant<'a> {
-    fn from_syn(node: &'a syn::Variant, scope: &ParamsInScope<'a>, span: Span) -> Result<Self> {
+    fn from_syn(
+        node: &'a syn::Variant,
+        scope: &ParamsInScope<'a>,
+        span: Span,
+        helpers: &'a crate::expand::DummyHelpers,
+    ) -> Result<Self> {
         let attrs = attr::get(&node.attrs)?;
         let span = attrs.span().unwrap_or(span);
-        Ok(Variant {
+        let mut variant = Variant {
             original: node,
             attrs,
             ident: node.ident.clone(),
             fields: Field::multiple_from_syn(&node.fields, scope, span)?,
-        })
+        };
+        if let Some(_dis) = variant.attrs.display.as_mut() {
+        } else {
+            if false {
+                let dis = attr::Display {
+                    original: &helpers.attr_empty,
+                    fmt: syn::LitStr::new("dummy", span),
+                    args: proc_macro2::TokenStream::new(),
+                    has_bonus_display: false,
+                    implied_bounds: std::collections::BTreeSet::new(),
+                    requires_fmt_machinery: true,
+                };
+                variant.attrs.display = Some(dis);
+            }
+        }
+        Ok(variant)
     }
 }
 
@@ -133,7 +181,7 @@ impl<'a> Field<'a> {
         scope: &ParamsInScope<'a>,
         span: Span,
     ) -> Result<Self> {
-        Ok(Field {
+        let field = Field {
             original: node,
             attrs: attr::get(&node.attrs)?,
             member: node.ident.clone().map(Member::Named).unwrap_or_else(|| {
@@ -144,7 +192,8 @@ impl<'a> Field<'a> {
             }),
             ty: &node.ty,
             contains_generic: scope.intersects(&node.ty),
-        })
+        };
+        Ok(field)
     }
 }
 
