@@ -396,12 +396,13 @@ fn impl_enum(input: Enum, _helpers: &crate::expand::DummyHelpers) -> TokenStream
     };
 
     use std::io::Write;
-    let mut fout = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("cstm-out.log")
-        .unwrap();
-    write!(&mut fout, "impl_enum for {}\n", input.ident).unwrap();
+    // let mut fout = std::fs::OpenOptions::new()
+    //     .create(true)
+    //     .append(true)
+    //     .open("cstm-out.log")
+    //     .unwrap();
+    let mut fout = Vec::new();
+    write!(fout, "impl_enum for {}\n", input.ident).unwrap();
 
     let typrefix = if let Some(cstm) = &input.attrs.cstm {
         if let Some(name) = &cstm.name {
