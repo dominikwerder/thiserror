@@ -14,6 +14,30 @@ pub struct Attrs<'a> {
     pub backtrace: Option<&'a Attribute>,
     pub from: Option<&'a Attribute>,
     pub transparent: Option<Transparent<'a>>,
+    pub cstm: Option<Cstm<'a>>,
+}
+
+impl<'a> core::fmt::Debug for Attrs<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Attrs").field("cstm", &self.cstm).finish()
+    }
+}
+
+#[allow(unused)]
+#[derive(Clone)]
+pub struct Cstm<'a> {
+    pub name: Option<String>,
+    pub original: &'a Attribute,
+    pub args: TokenStream,
+}
+
+impl<'a> core::fmt::Debug for Cstm<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cstm")
+            .field("name", &self.name)
+            .field("args", &self.args)
+            .finish()
+    }
 }
 
 #[derive(Clone)]
@@ -52,6 +76,7 @@ pub fn get(input: &[Attribute]) -> Result<Attrs> {
         backtrace: None,
         from: None,
         transparent: None,
+        cstm: None,
     };
 
     for attr in input {
@@ -81,10 +106,96 @@ pub fn get(input: &[Attribute]) -> Result<Attrs> {
                 return Err(Error::new_spanned(attr, "duplicate #[from] attribute"));
             }
             attrs.from = Some(attr);
+        } else if attr.path().is_ident("cstm") {
+            parse_cstm_attribute(&mut attrs, attr)?;
         }
     }
 
     Ok(attrs)
+}
+
+fn parse_cstm_attribute<'a>(attrs: &mut Attrs<'a>, attr: &'a Attribute) -> Result<()> {
+    syn::custom_keyword!(dbg);
+    syn::custom_keyword!(name);
+
+    attr.parse_args_with(|input: ParseStream| {
+        if let Some(_kw) = input.parse::<Option<dbg>>()? {
+            if false && attrs.transparent.is_some() {
+                return Err(Error::new_spanned(attr, "duplicate #[cstm(dbg)] attribute"));
+            }
+            // attrs.transparent = Some(Transparent {
+            //     original: attr,
+            //     span: kw.span,
+            // });
+            // return Ok(());
+        }
+
+        let mut name = None;
+
+        let args = if false {
+            let _fmt: LitStr = input.parse()?;
+
+            let ahead = input.fork();
+            ahead.parse::<Option<Token![,]>>()?;
+            let args = if ahead.is_empty() {
+                input.advance_to(&ahead);
+                TokenStream::new()
+            } else {
+                parse_token_expr(input, false)?
+            };
+
+            let _requires_fmt_machinery = !args.is_empty();
+
+            args
+        } else {
+            let args: TokenStream = input.parse()?;
+            let mut tokens = Vec::new();
+            use core::fmt::Write;
+            let mut buf = String::new();
+            for token in args.clone() {
+                write!(&mut buf, "token {token:?}\n").unwrap();
+                tokens.push(token);
+            }
+            for (i, token) in tokens.iter().enumerate() {
+                if let TokenTree::Ident(h) = token {
+                    if h == "name" {
+                        if i + 2 < tokens.len() {
+                            if let TokenTree::Punct(p) = &tokens[i + 1] {
+                                if p.as_char() == '=' {
+                                    if let TokenTree::Literal(l) = &tokens[i + 2] {
+                                        // let lit =
+                                        //     LitStr::new(l.to_string().as_str(), Span::call_site())
+                                        //         .value();
+                                        // panic!("{}", lit);
+                                        let s = l.to_string();
+                                        let n = &s[1..s.len() - 1];
+                                        name = Some(n.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // panic!("{}", buf);
+            args
+        };
+
+        let cstm = Cstm {
+            name,
+            original: attr,
+            args,
+        };
+        if attrs.cstm.is_some() {
+            return Err(Error::new_spanned(
+                attr,
+                "only one #[cstm(...)] attribute is allowed",
+            ));
+        }
+        attrs.cstm = Some(cstm);
+        // panic!("{:?}", attrs);
+        Ok(())
+    })
 }
 
 fn parse_error_attribute<'a>(attrs: &mut Attrs<'a>, attr: &'a Attribute) -> Result<()> {
