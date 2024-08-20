@@ -612,7 +612,7 @@ fn impl_enum(input: Enum, _helpers: &crate::expand::DummyHelpers) -> TokenStream
         Some(quote! {
             #[allow(unused_qualifications)]
             impl #impl_generics ::core::fmt::Display for #ty #ty_generics  {
-                fn fmt(&self, __formatter: &mut ::core::fmt::Formatter) -> std::fmt::Result {
+                fn fmt(&self, __formatter: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                     #use_as_display
                     #[allow(unused_variables, deprecated, clippy::used_underscore_binding)]
                     match #void_deref self {
@@ -663,6 +663,19 @@ fn impl_enum(input: Enum, _helpers: &crate::expand::DummyHelpers) -> TokenStream
     }
     let error_where_clause = error_inferred_bounds.augment_where_clause(input.generics);
 
+    let public_message_impl = if input.attrs.cstm.is_some() {
+        Some(quote! {
+            // #[allow(unused_qualifications)]
+            impl #ty #ty_generics  {
+                fn public_message(&self) -> String {
+                    format!("{}", self)
+                }
+            }
+        })
+    } else {
+        None
+    };
+
     quote! {
         #[allow(unused_qualifications)]
         impl #impl_generics std::error::Error for #ty #ty_generics #error_where_clause {
@@ -672,6 +685,7 @@ fn impl_enum(input: Enum, _helpers: &crate::expand::DummyHelpers) -> TokenStream
         #display_impl
         #(#from_impls)*
         #user_info_impl
+        #public_message_impl
     }
 }
 

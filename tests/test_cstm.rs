@@ -60,6 +60,15 @@ fn apple_03() {
 }
 
 #[test]
+fn apple_03_public() {
+    let e = ErrorF::from(ErrorA::from("worms"));
+    assert_eq!(
+        e.public_message(),
+        "FoodError::Apple(AppleError::Message(worms))"
+    );
+}
+
+#[test]
 fn banana_00() {
     assert_eq!(ErrorB::BadRadius.to_string(), "BananaError::BadRadius");
 }
